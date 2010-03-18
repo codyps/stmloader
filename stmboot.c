@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -35,16 +36,19 @@ int debug = 1;
 
 void perror_at_line(int status, int errnum, const char *fname,
 	unsigned int linenum, const char *format, ...) {
-		fflush(stdout);                                    \
-	fprintf(stderr,"%s:%d ",__func__,__LINE__);        \
-	if (_errno_)                                       \
-		fprintf(stderr,"[%s] : ",strerror(errnum));\
-	else                                               \
-		fprintf(stderr," : ");                     \
-	fprintf(stderr,__VA_ARGS__);                       \
-	fflush(stderr);                                    \
-	if (_exitnum_)                                     \
-		exit(_exitnum_);                           \	
+	va_list vl;
+	va_start(vl,format);
+
+	fflush(stdout);
+	fprintf(stderr,"%s:%d ",__func__,__LINE__);
+	if (errnum)
+		fprintf(stderr,"[%s] : ",strerror(errnum));
+	else
+		fprintf(stderr," : ");
+	vfprintf(stderr,format,vl);                       
+	fflush(stderr);                                   
+	if (status)                                     
+		exit(status);
 }
 
 enum to_boot {
@@ -128,9 +132,8 @@ int wait_ack(int fd, long usec_tout) {
 	char tmp;
 	int ret;
 	fd_set fds;
+	struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
 	do {
-		struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
-
 		FD_ZERO(&fds);
 		FD_SET(fd,&fds);
 
