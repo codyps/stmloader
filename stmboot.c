@@ -43,14 +43,42 @@ enum from_boot {
  * received bytes, data + checksum, the result at the end of
  * the packet must be 0x00.
  */
-int s_read(int fd, void *buf, size_t nbyte) {
+
+enum {
+	R_ERR = -3,
+	R_UNEX = -2,
+	R_TIME = -1,
+	R_OK = 0,
+	R_ACK = 0,
+	R_NACK = 1
+}
+
+// -3 = error
+int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 	size_t pos = 0;
 	ssize_t ret;
+	size_t sret;
+	fd_set fds;
+	struct timeval timeout = { .tv_sec=0, .tv_usec=0 };
+
 	do {
+		FD_ZERO(&fds);
+		FD_SET(fd,&fds);
+		timeout.tv_sec =0;
+		timeout.tv_usec=usec_tout;
+
+		sret = select(fd+1,&fds,NULL,NULL,&timeout);
+		if (sret == 0) return R_TIME;
+
+		if (sret != 1) {
+			perror("select");
+			return R_ERR;
+		}
+	
 		ret = read(fd, buf + pos, nbyte - pos);
 		if (ret == -1) {
 			perror("s_read");
-			return -1;
+			return R_ERR;
 		}
 		pos += ret;
 	
@@ -58,36 +86,53 @@ int s_read(int fd, void *buf, size_t nbyte) {
 	return 0;
 }
 
-int wait_ack(FILE *f, size_t timeout) {
+
+// 1 = nack, 0 = ack, -1 = timeout, -2 = unexpected data, -3 error 
+int wait_ack(int fd, long usec_tout) {
 	char tmp;
 	size_t i;
 	int ret;
-	for(i = 0; i < timeout; i++) {
-		ret = fgetc(f);	
-		if (ret == -1) 
-			return -2;
-		if (ret == b_ack) 
-			return 0;
-		if (ret == b_nack)
-			return 1;
+	fd_set fds;
+	struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
 
+	FD_ZERO(&fds);
+	FD_SET(fd,&fds);
+
+	ret = select(fd+1,&fds,NULL,NULL,&timeout);
+
+	switch (ret) {
+		case 0:
+			return -1;
+
+		case 1: 
+			read(fd,&tmp,1);
+			if (tmp == b_ack)
+				return 0;
+			if (tmp == b_nack)
+				return 1;
+			return -2;
+
+		default:
+		case -1: 
+			return -3;
 	}
-	return -3;
 }
 
-int bootloader_init(FILE *f) {
+// 0 = success, 1 = nacked, -1 = timeout, -2 = unknowndata, -3 = error
+int bootloader_init(int fd, long usec_tout) {
 	char tmp = i_start;
 	int ret;
-	do {	
-		ret = fputc(i_start,f);
-		if (ret == -1)
-				return -4;
-		ret = wait_ack(fd,2000);
+	do {
+		do {
+			ret = write(fd,&i_start,1);
+		while (ret == 0);
+		if (ret == -1) return -4;
+		ret = wait_ack(fd,usec_tout);
 	} while( ret < 0);
 	return ret;
 }
 
-int send_command(FILE *f, enum to_boot com) {
+int send_command(int fd, enum to_boot com, long usec_tout) {
 	char tmp[2];
 	ssize_t ret;
 	size_t pos = 0;
@@ -96,19 +141,18 @@ int send_command(FILE *f, enum to_boot com) {
 	do {
 		ret = write( fd, tmp + pos, sizeof(tmp) - pos);
 		if (ret == -1)
-			return -1;
+			return -4;
 		pos += ret;
 	} while(pos < sizeof(tmp));
 	
-	return wait_ack(fd, 20000);
+	return wait_ack(fd, usec_tout);
 }
 
 void usage(char *name) {
 	fprintf(stderr,"usage: %s <serial port>\n",name);
 }
 
-int serial_init(FILE *f) {
-	int fd = fileno(f);
+int serial_init(int fd) {
 	struct termios tp_o;
 	struct termios tp_n;
 	int ret = tcgetattr(fd, &tp_o);
@@ -145,6 +189,7 @@ int serial_init(FILE *f) {
 }
 
 int main(int argc, char **argv) {
+	long utimeout = 200000;
 	if (argc != 2) {
 		usage(argv[0]);
 		return 1;
@@ -156,19 +201,26 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
-	int ret = serial_init(serial_f);
+	int serial_fd = fileno(serial_f);
+
+	int ret = serial_init(serial_fd);
 	if (ret) {
 		fprintf(stderr,"could not initialize serial\n");
 	}
 
 	do {
-		ret = bootloader_init(serial_f);
+		ret = bootloader_init(serial_fd, utimeout);
 		//printf("bootloader_init: %d\n",ret);
-	} while (ret == -3);
+		if (ret <= R_ERR) {
+			perror("bootloader_init");
+			return ret;
+		}
+	} while (ret < R_OK);
+
 	printf("connected to bootloader (%d)\n",ret);
 
 	do {
-		ret = send_command(serial_f, c_get);
+		ret = send_command(serial_fd, c_get, utimeout);
 		//printf("sendcommand(c_get): %d\n",ret);
 	} while (ret == -3);
 	printf("sent command c_get (%d)\n",ret);
