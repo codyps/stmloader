@@ -10,7 +10,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-int debug = 0;
+int debug = 1;
 
 #define LOG(...) do {                               \
 		if (debug) {                        \
@@ -20,9 +20,36 @@ int debug = 0;
 		}                                   \
 	} while(0);                                 \
 
+#define WARN(_exitnum_,_errnum_,...) do {                          \
+		fflush(stdout);                                    \
+		fprintf(stderr,"%s:%d ",__func__,__LINE__);        \
+		if (_errno_)                                       \
+			fprintf(stderr,"[%s] : ",strerror(errnum));\
+		else                                               \
+			fprintf(stderr," : ");                     \
+		fprintf(stderr,__VA_ARGS__);                       \
+		fflush(stderr);                                    \
+		if (_exitnum_)                                     \
+			exit(_exitnum_);                           \
+	} while(0);
+
+void perror_at_line(int status, int errnum, const char *fname,
+	unsigned int linenum, const char *format, ...) {
+		fflush(stdout);                                    \
+	fprintf(stderr,"%s:%d ",__func__,__LINE__);        \
+	if (_errno_)                                       \
+		fprintf(stderr,"[%s] : ",strerror(errnum));\
+	else                                               \
+		fprintf(stderr," : ");                     \
+	fprintf(stderr,__VA_ARGS__);                       \
+	fflush(stderr);                                    \
+	if (_exitnum_)                                     \
+		exit(_exitnum_);                           \	
+}
+
 enum to_boot {
 	c_get      = 0x00,
-	c_get_prot = 0x01,
+	c_getv     = 0x01,
 	c_get_id   = 0x02,
 	c_read     = 0x11,
 	c_run      = 0x21,
@@ -55,11 +82,11 @@ enum from_boot {
  */
 
 enum returns{
-	R_ERR = -3,
-	R_UNEX = -2,
-	R_TIME = -1,
-	R_ACK = 0,
-	R_NACK = 1
+	kERR = -3,
+	kUNEX = -2,
+	kTIME = -1,
+	kACK = 0,
+	kNACK = 1
 };
 
 // -3 = error
@@ -77,17 +104,17 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 		timeout.tv_usec=usec_tout;
 
 		sret = select(fd+1,&fds,NULL,NULL,&timeout);
-		if (sret == 0) return R_TIME;
+		if (sret == 0) return kTIME;
 
 		if (sret != 1) {
 			perror("select");
-			return R_ERR;
+			return kERR;
 		}
 	
 		ret = read(fd, buf + pos, nbyte - pos);
 		if (ret == -1) {
 			perror("s_read");
-			return R_ERR;
+			return kERR;
 		}
 		pos += ret;
 	
@@ -96,34 +123,41 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 }
 
 
-// 1 = nack, 0 = ack, -1 = timeout, -2 = unexpected data, -3 error 
+// 1 = nack, 0 = ack, -1 = timeout, -3 = error
 int wait_ack(int fd, long usec_tout) {
 	char tmp;
 	int ret;
 	fd_set fds;
-	struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
+	do {
+		struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
 
-	FD_ZERO(&fds);
-	FD_SET(fd,&fds);
+		FD_ZERO(&fds);
+		FD_SET(fd,&fds);
 
-	ret = select(fd+1,&fds,NULL,NULL,&timeout);
+		ret = select(fd+1,&fds,NULL,NULL,&timeout);
 
-	switch (ret) {
-		case 0:
-			return -1;
-
-		case 1: 
-			read(fd,&tmp,1);
-			if (tmp == b_ack)
-				return 0;
-			if (tmp == b_nack)
-				return 1;
-			return -2;
-
-		default:
-		case -1: 
-			return -3;
-	}
+		switch (ret) {
+			case 0: LOG("   wait_ack timeout\n");
+				return -1;
+	
+			case 1: 
+				read(fd,&tmp,1);
+				if (tmp == b_ack) {
+					LOG("   got ack\n");
+					return 0;
+				}
+				if (tmp == b_nack) {
+					LOG("   got nack\n");
+					return 1;
+				}
+				LOG("   wait_ack recieved junk byte %x\n",tmp);
+				break;
+			default:
+			case -1:
+				LOG("wait_ack: error");
+				return kERR;
+		}
+	} while (1);
 }
 
 // 0 = success, 1 = nacked, -1 = timeout, -2 = unknowndata, -3 = error
@@ -134,7 +168,7 @@ int bootloader_init(int fd, long usec_tout) {
 		do {
 			ret = write(fd,&tmp,1);
 		} while (ret == 0);
-		if (ret == -1) return -5;
+		if (ret == -1) return kERR - 1;
 		ret = wait_ack(fd,usec_tout);
 	} while( ret < 0);
 	return ret;
@@ -149,7 +183,7 @@ int send_command(int fd, enum to_boot com, long usec_tout) {
 	do {
 		ret = write( fd, tmp + pos, sizeof(tmp) - pos);
 		if (ret == -1)
-			return -4;
+			return kERR - 1;
 		pos += ret;
 	} while(pos < sizeof(tmp));
 	
@@ -195,21 +229,79 @@ int serial_init(int fd) {
 
 	return 0;
 }
+int get_id(int fd, long utimeout) {
+	int ret;
+	do {
+		ret = send_command(fd, c_getv, utimeout);
+	} while (ret == kTIME);
+	LOG("send command c_geti (%d)\n",ret);
+	if (ret <= kERR) {
+		perror("send command");
+		return ret -1;
+	}
+
+	char len;
+	ret = s_read(fd, &len, 1, utimeout);
+
+	char *data = malloc(len+1);
+	ret = s_read(fd, data, len+1, utimeout);
+
+	wait_ack(fd,utimeout);
+
+	printf("GET_ID\n"
+	       " PID: %02x " 
+	      ,data[0]);
+	int i;
+	for (i = 0; i <	len; i++) 
+		printf("%02x ",data[i+1]);
+	putchar('\n');
+	return 0;
+}
+
+
+int get_version(int fd, long utimeout) {
+	int ret;
+	do {
+		ret = send_command(fd, c_getv, utimeout);
+	} while (ret == kTIME);
+	LOG("get_version: command c_getv (%d)\n",ret);
+	if (ret <= kERR) {
+		perror("send command");
+		return ret -1;
+	}
+
+	char data[3];
+	ret = s_read(fd, data, 3, utimeout);
+
+	wait_ack(fd,utimeout);
+
+	printf("GETV\n"
+	       " bootloader version: %x\n"
+	       " option byte 1 (0) : %x\n"
+	       " option byte 2 (0) : %x\n"
+	      ,data[0],data[1],data[2]);
+	return 0;
+}
 
 int get_commands(int fd, long utimeout) {
 	int ret;
-	do {
-		ret = send_command(fd, c_get, utimeout);
-		//printf("sendcommand(c_get): %d\n",ret);
-	} while (ret == -3);
+	ret = send_command(fd, c_get_id, utimeout);
 	LOG("sent command c_get (%d)\n",ret);
+	if (ret < 0) {
+		fprintf(stderr,"get_c: send_command : %d : ",ret);
+		perror(0);
+		return ret - 1;
+	}
 
 	uint8_t n;
 	ret = s_read(fd, &n, 1, utimeout);
 	LOG("s_read{c_get bytes}: %d [ numbytes: %u ]\n",ret,n);
 
-	if (ret < 0) 
-		return ret;
+	if (ret < 0)  {
+		fprintf(stderr,"get_c: s_read : %d : ", ret);
+		perror(0);
+		return ret - 2;
+	}
 
 	uint8_t *get_d = malloc(n);
 	if (!get_d) {
@@ -218,11 +310,22 @@ int get_commands(int fd, long utimeout) {
 	}
 	
 	ret = s_read(fd, get_d, n, utimeout);
+	if (ret < 0) {
+		fprintf(stderr,"get_c: s_read: %d : ",ret);
+		perror(0);
+		return ret -3;
+	}
 	LOG("s_read{c_get data}: %d\n",ret);
 
+	ret = wait_ack(fd,utimeout);
+	if (ret) {
+		fprintf(stderr,"get_c: wait_ack: %d : ",ret);
+		perror(0);
+	}
 	size_t i;
-	printf("  version: %x\n"
-	       "  supported commands: ",get_d[0]);
+	printf("GET\n"
+	       " bootloader version: %x\n"
+	       " supported commands: ",get_d[0]);
 	for (i = 1; i < n; i++) {
 		printf("%x, ",get_d[i]);
 	}
@@ -237,14 +340,6 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	
-	/*
-	FILE *serial_f = fopen(argv[1], "rw");
-	if (!serial_f) {
-		perror("Failed to open serial");
-		return 2;
-	}
-	*/
-
 	int serial_fd = open(argv[1], O_RDWR);//fileno(serial_f);
 	if (serial_fd == -1) {
 		perror("Failed to open serial");
@@ -259,7 +354,7 @@ int main(int argc, char **argv) {
 	do {
 		ret = bootloader_init(serial_fd, utimeout);
 		//printf("bootloader_init: %d\n",ret);
-		if (ret <= R_ERR) {
+		if (ret <= kERR) {
 			fprintf(stderr,"bootloader_init (%d):",ret);
 			perror(0);
 			return ret;
@@ -268,33 +363,8 @@ int main(int argc, char **argv) {
 
 	printf("connected to bootloader (%d)\n",ret);
 
-	do {
-		ret = send_command(serial_fd, c_get, utimeout);
-		//printf("sendcommand(c_get): %d\n",ret);
-	} while (ret == -3);
-	printf("sent command c_get (%d)\n",ret);
-
-	uint8_t n;
-	ret = s_read(serial_fd, &n, 1, utimeout);
-	printf("s_read{c_get bytes}: %d [ numbytes: %u ]\n",ret,n);
-	if (ret < 0) 
-		return ret;
-
-	uint8_t *get_d = malloc(n);
-	if (!get_d) {
-		perror("malloc");
-		return -7;
-	}
-	
-	ret = s_read(serial_fd, get_d, n, utimeout);
-	printf("s_read{c_get data}: %d\n",ret);
-	size_t i;
-	printf("  version: %x\n"
-	       "  supported commands: ",get_d[0]);
-	for (i = 1; i < n; i++) {
-		printf("%x, ",get_d[i]);
-	}
-	putchar('\n');
-	
+	get_commands(serial_fd,utimeout);
+	get_version(serial_fd,utimeout);
+	get_id(serial_fd,utimeout);
 	return 0;
 }

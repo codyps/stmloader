@@ -7,7 +7,7 @@ OBJECTS= $(SOURCE:=.o)
 TRASH  = gmon.out
 
 CFLAGS = -g
-ALL_CFLAGS = -ansi -pedantic -Wall $(CFLAGS)
+ALL_CFLAGS = -Wall $(CFLAGS)
 ALL_LFLAGS = $(ALL_CFLAGS) $(LDFLAGS)
 ALL_AFLAGS = $(ALL_CFLAGS)
 
