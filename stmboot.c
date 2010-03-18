@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <errno.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -19,20 +20,12 @@ int debug = 1;
 			fprintf(stderr,__VA_ARGS__);\
 			fflush(stderr);             \
 		}                                   \
-	} while(0);                                 \
+	} while(0)
 
-#define WARN(_exitnum_,_errnum_,...) do {                          \
-		fflush(stdout);                                    \
-		fprintf(stderr,"%s:%d ",__func__,__LINE__);        \
-		if (_errno_)                                       \
-			fprintf(stderr,"[%s] : ",strerror(errnum));\
-		else                                               \
-			fprintf(stderr," : ");                     \
-		fprintf(stderr,__VA_ARGS__);                       \
-		fflush(stderr);                                    \
-		if (_exitnum_)                                     \
-			exit(_exitnum_);                           \
-	} while(0);
+#define WARN(_exitnum_,_errnum_,...) do {                      \
+		perror_at_line(_exitnum_,_errnum_,             \
+				__func__,__LINE__,__VA_ARGS__);\
+	} while(0)
 
 void perror_at_line(int status, int errnum, const char *fname,
 	unsigned int linenum, const char *format, ...) {
@@ -40,14 +33,14 @@ void perror_at_line(int status, int errnum, const char *fname,
 	va_start(vl,format);
 
 	fflush(stdout);
-	fprintf(stderr,"%s:%d ",__func__,__LINE__);
+	fprintf(stderr,"%s:%d ",fname,linenum);
 	if (errnum)
 		fprintf(stderr,"[%s] : ",strerror(errnum));
 	else
 		fprintf(stderr," : ");
-	vfprintf(stderr,format,vl);                       
-	fflush(stderr);                                   
-	if (status)                                     
+	vfprintf(stderr,format,vl);
+	fflush(stderr);
+	if (status)
 		exit(status);
 }
 
@@ -117,7 +110,7 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 	
 		ret = read(fd, buf + pos, nbyte - pos);
 		if (ret == -1) {
-			perror("s_read");
+			WARN(0,errno,"read failed\n");
 			return kERR;
 		}
 		pos += ret;
@@ -131,33 +124,39 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 int wait_ack(int fd, long usec_tout) {
 	char tmp;
 	int ret;
+	ssize_t rret;
 	fd_set fds;
-	struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
 	do {
+		struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
 		FD_ZERO(&fds);
 		FD_SET(fd,&fds);
 
 		ret = select(fd+1,&fds,NULL,NULL,&timeout);
 
 		switch (ret) {
-			case 0: LOG("   wait_ack timeout\n");
+			case  0: 
+				LOG("   wait_ack timeout\n");
 				return -1;
 	
-			case 1: 
-				read(fd,&tmp,1);
-				if (tmp == b_ack) {
-					LOG("   got ack\n");
-					return 0;
+			case  1: 
+				rret = read(fd,&tmp,1);
+				if (rret == 1) {
+					if (tmp == b_ack) {
+						LOG("   got ack\n");
+						return 0;
+					}
+					if (tmp == b_nack) {
+						LOG("   got nack\n");
+						return 1;
+					}
+					WARN(0,0,"recieved junk byte %x\n",tmp);
+				} else {
+					WARN(0,0,"read %d\n",rret);
 				}
-				if (tmp == b_nack) {
-					LOG("   got nack\n");
-					return 1;
-				}
-				LOG("   wait_ack recieved junk byte %x\n",tmp);
 				break;
 			default:
 			case -1:
-				LOG("wait_ack: error");
+				WARN(0,errno,"select error");
 				return kERR;
 		}
 	} while (1);
