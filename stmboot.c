@@ -12,10 +12,11 @@
 #include <termios.h>
 #include <unistd.h>
 
-int debug = 1;
+int debug = 0;
+#define unlikely(x)     __builtin_expect((x),0)
 
 #define INFO(...) do {                                                      \
-		if (debug) {                                               \
+		if (unlikely(debug)) {                                               \
 			fprintf(stderr,"INFO: ");\
 			perror_at_line(0,0,__func__,__LINE__,__VA_ARGS__); \
 		}                                                          \
@@ -181,6 +182,7 @@ int send_command(int fd, enum to_boot com, long usec_tout) {
 	char tmp[2];
 	ssize_t ret;
 	size_t pos = 0;
+	INFO("sending 0x%02X\n",com);
 	tmp[0] = com;
 	tmp[1] = ~com;
 	do {
@@ -235,10 +237,10 @@ int serial_init(int fd) {
 int get_id(int fd, long utimeout) {
 	int ret;
 	do {
-		ret = send_command(fd, c_getv, utimeout);
+		ret = send_command(fd, c_get_id, utimeout);
 	} while (ret == kTIME);
 	INFO("send command c_geti (%d)\n",ret);
-	if (ret <= kERR) {
+	if (ret) {
 		WARN(0,errno,"send command\n");
 		return ret -1;
 	}
@@ -294,7 +296,9 @@ int get_version(int fd, long utimeout) {
 
 int get_commands(int fd, long utimeout) {
 	int ret;
-	ret = send_command(fd, c_get_id, utimeout);
+	do {
+		ret = send_command(fd, c_get, utimeout);
+	} while (ret == kTIME);
 	INFO("sent command c_get (%d)\n",ret);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d\n",ret);
