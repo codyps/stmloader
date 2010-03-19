@@ -14,17 +14,17 @@
 
 int debug = 1;
 
-#define LOG(...) do {                               \
-		if (debug) {                        \
-			fflush(stdout);             \
-			fprintf(stderr,__VA_ARGS__);\
-			fflush(stderr);             \
-		}                                   \
+#define LOG(...) do {                                                      \
+		if (debug) {                                               \
+			fprintf(stderr,"LOG : ");\
+			perror_at_line(0,0,__func__,__LINE__,__VA_ARGS__); \
+		}                                                          \
 	} while(0)
 
-#define WARN(_exitnum_,_errnum_,...) do {                      \
-		perror_at_line(_exitnum_,_errnum_,             \
-				__func__,__LINE__,__VA_ARGS__);\
+#define WARN(_exitnum_,_errnum_,...) do {               \
+		fprintf(stderr,"WARN: ");\
+		perror_at_line(_exitnum_,_errnum_,      \
+			__func__,__LINE__,__VA_ARGS__); \
 	} while(0)
 
 void perror_at_line(int status, int errnum, const char *fname,
@@ -104,7 +104,7 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 		if (sret == 0) return kTIME;
 
 		if (sret != 1) {
-			perror("select");
+			WARN(0,errno,"select\n");
 			return kERR;
 		}
 	
@@ -114,7 +114,6 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 			return kERR;
 		}
 		pos += ret;
-	
 	} while (pos < nbyte);
 	return 0;
 }
@@ -135,18 +134,18 @@ int wait_ack(int fd, long usec_tout) {
 
 		switch (ret) {
 			case  0: 
-				LOG("   wait_ack timeout\n");
+				LOG("timeout\n");
 				return -1;
 	
 			case  1: 
 				rret = read(fd,&tmp,1);
 				if (rret == 1) {
 					if (tmp == b_ack) {
-						LOG("   got ack\n");
+						LOG("got ack\n");
 						return 0;
 					}
 					if (tmp == b_nack) {
-						LOG("   got nack\n");
+						LOG("got nack\n");
 						return 1;
 					}
 					WARN(0,0,"recieved junk byte %x\n",tmp);
@@ -156,7 +155,7 @@ int wait_ack(int fd, long usec_tout) {
 				break;
 			default:
 			case -1:
-				WARN(0,errno,"select error");
+				WARN(0,errno,"select error\n");
 				return kERR;
 		}
 	} while (1);
@@ -172,7 +171,7 @@ int bootloader_init(int fd, long usec_tout) {
 		} while (ret == 0);
 		if (ret == -1) return kERR - 1;
 		ret = wait_ack(fd,usec_tout);
-	} while( ret < 0);
+	} while( ret < 0 );
 	return ret;
 }
 
@@ -201,7 +200,7 @@ int serial_init(int fd) {
 	struct termios tp_n;
 	int ret = tcgetattr(fd, &tp_o);
 	if (ret == -1) {
-		perror("tcgetattr");
+		WARN(0,errno,"tcgetattr");
 		return 3;
 	}
 
@@ -214,7 +213,7 @@ int serial_init(int fd) {
 
 	ret = cfsetispeed(&tp_n,B115200);
 	if (ret == -1) {
-		perror("cfsetispeed");
+		WARN(0,errno,"cfsetispeed");
 		return 4;
 	}
 	ret = cfsetospeed(&tp_n,B115200);
@@ -238,7 +237,7 @@ int get_id(int fd, long utimeout) {
 	} while (ret == kTIME);
 	LOG("send command c_geti (%d)\n",ret);
 	if (ret <= kERR) {
-		perror("send command");
+		WARN(0,errno,"send command\n");
 		return ret -1;
 	}
 
@@ -268,7 +267,7 @@ int get_version(int fd, long utimeout) {
 	} while (ret == kTIME);
 	LOG("get_version: command c_getv (%d)\n",ret);
 	if (ret <= kERR) {
-		perror("send command");
+		WARN(0,errno,"send command\n");
 		return ret -1;
 	}
 
