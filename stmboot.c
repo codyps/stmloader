@@ -14,9 +14,9 @@
 
 int debug = 1;
 
-#define LOG(...) do {                                                      \
+#define INFO(...) do {                                                      \
 		if (debug) {                                               \
-			fprintf(stderr,"LOG : ");\
+			fprintf(stderr,"INFO: ");\
 			perror_at_line(0,0,__func__,__LINE__,__VA_ARGS__); \
 		}                                                          \
 	} while(0)
@@ -27,8 +27,10 @@ int debug = 1;
 			__func__,__LINE__,__VA_ARGS__); \
 	} while(0)
 
-void perror_at_line(int status, int errnum, const char *fname,
-	unsigned int linenum, const char *format, ...) {
+void __attribute__((format(printf,5,6)))
+perror_at_line(int status, int errnum, const char *fname,
+	unsigned int linenum, const char *format, ...)
+{
 	va_list vl;
 	va_start(vl,format);
 
@@ -134,18 +136,18 @@ int wait_ack(int fd, long usec_tout) {
 
 		switch (ret) {
 			case  0: 
-				LOG("timeout\n");
+				INFO("timeout\n");
 				return -1;
 	
 			case  1: 
 				rret = read(fd,&tmp,1);
 				if (rret == 1) {
 					if (tmp == b_ack) {
-						LOG("got ack\n");
+						INFO("got ack\n");
 						return 0;
 					}
 					if (tmp == b_nack) {
-						LOG("got nack\n");
+						INFO("got nack\n");
 						return 1;
 					}
 					WARN(0,0,"recieved junk byte %x\n",tmp);
@@ -235,7 +237,7 @@ int get_id(int fd, long utimeout) {
 	do {
 		ret = send_command(fd, c_getv, utimeout);
 	} while (ret == kTIME);
-	LOG("send command c_geti (%d)\n",ret);
+	INFO("send command c_geti (%d)\n",ret);
 	if (ret <= kERR) {
 		WARN(0,errno,"send command\n");
 		return ret -1;
@@ -261,20 +263,26 @@ int get_id(int fd, long utimeout) {
 
 
 int get_version(int fd, long utimeout) {
+	INFO("getting version\n");
 	int ret;
-	do {
-		ret = send_command(fd, c_getv, utimeout);
-	} while (ret == kTIME);
-	LOG("get_version: command c_getv (%d)\n",ret);
-	if (ret <= kERR) {
+	ret = send_command(fd, c_getv, utimeout);
+	INFO("send command c_getv (%d)\n",ret);
+	if (ret) {
 		WARN(0,errno,"send command\n");
 		return ret -1;
 	}
 
 	char data[3];
 	ret = s_read(fd, data, 3, utimeout);
-
-	wait_ack(fd,utimeout);
+	if (ret) {
+		WARN(0,errno,"s_read of 3 bytes returned %d\n",ret);
+		return -4;
+	}
+		
+	ret = wait_ack(fd,utimeout);
+	if (ret) {
+		WARN(0,errno,"wait_ack returned %d\n",ret);
+	}
 
 	printf("GETV\n"
 	       " bootloader version: %x\n"
@@ -287,20 +295,19 @@ int get_version(int fd, long utimeout) {
 int get_commands(int fd, long utimeout) {
 	int ret;
 	ret = send_command(fd, c_get_id, utimeout);
-	LOG("sent command c_get (%d)\n",ret);
-	if (ret < 0) {
-		fprintf(stderr,"get_c: send_command : %d : ",ret);
-		perror(0);
+	INFO("sent command c_get (%d)\n",ret);
+	if (ret) {
+		WARN(0,errno,"send_command returned %d\n",ret);
 		return ret - 1;
 	}
 
 	uint8_t n;
 	ret = s_read(fd, &n, 1, utimeout);
-	LOG("s_read{c_get bytes}: %d [ numbytes: %u ]\n",ret,n);
+	INFO("s_read of numbytes returned %d and got %u\n",ret,n);
 
-	if (ret < 0)  {
-		fprintf(stderr,"get_c: s_read : %d : ", ret);
-		perror(0);
+	if (ret)  {
+		WARN(0,errno,
+			"s_read of numbytes returned %d and got %u\n",ret,n);
 		return ret - 2;
 	}
 
@@ -311,17 +318,16 @@ int get_commands(int fd, long utimeout) {
 	}
 	
 	ret = s_read(fd, get_d, n, utimeout);
-	if (ret < 0) {
-		fprintf(stderr,"get_c: s_read: %d : ",ret);
-		perror(0);
+	if (ret) {
+		WARN(0,errno,
+			"s_read of commands returned %d\n",ret);
 		return ret -3;
 	}
-	LOG("s_read{c_get data}: %d\n",ret);
+	INFO("s_read{c_get data}: %d\n",ret);
 
 	ret = wait_ack(fd,utimeout);
 	if (ret) {
-		fprintf(stderr,"get_c: wait_ack: %d : ",ret);
-		perror(0);
+		WARN(0,errno,"wait_ack: %d\n",ret);
 	}
 	size_t i;
 	printf("GET\n"
@@ -362,7 +368,7 @@ int main(int argc, char **argv) {
 		}
 	} while (ret < 0);
 
-	printf("connected to bootloader (%d)\n",ret);
+	INFO("connected to bootloader : %d\n",ret);
 
 	get_commands(serial_fd,utimeout);
 	get_version(serial_fd,utimeout);
