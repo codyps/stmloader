@@ -11,6 +11,7 @@
 
 #include <termios.h>
 #include <unistd.h>
+#include <getopt.h>
 
 int debug = 0;
 #define unlikely(x)     __builtin_expect((x),0)
@@ -194,11 +195,6 @@ int send_command(int fd, enum to_boot com, long usec_tout) {
 	
 	return wait_ack(fd, usec_tout);
 }
-
-void usage(char *name) {
-	fprintf(stderr,"usage: %s <serial port>\n",name);
-}
-
 int serial_init(int fd) {
 	struct termios tp_o;
 	struct termios tp_n;
@@ -344,38 +340,101 @@ int get_commands(int fd, long utimeout) {
 	return 0;
 }
 
+const char optstr[] = "hDt:icvprgweXxZz";
+
+void usage(char *name) {
+	fprintf(stderr,
+		"usage: %s [options] [actions] <serial port>\n"
+		"options: -h            help (show this)\n"
+		"         -D            debugging output\n"
+		"         -t useconds   change serial timeout\n"
+		"actions: -i            initialize bootloader\n"
+		"         -c            get boot supported commands\n"
+		"         -v            get boot version\n"
+		"         -p            get pid\n"
+		"         -r            read memory\n"
+		"         -g            \"go\", execute\n"
+		"         -w            write memory\n"
+		"         -e            erase memory\n"
+		"         -X sector:ct  write protect\n"
+		"         -x            write unprotect\n"
+		"         -Z            readout protect\n"
+		"         -z            readout unprotect\n"
+		       ,name);
+}
+
 int main(int argc, char **argv) {
 	long utimeout = 200000;
-	if (argc != 2) {
+
+	if (argc < 2) {
+		WARN(0,0,"unspecified serial port\n");
 		usage(argv[0]);
 		return 1;
 	}
-	
-	int serial_fd = open(argv[1], O_RDWR);//fileno(serial_f);
+
+
+	int serial_fd = open(argv[argc-1], O_RDWR);//fileno(serial_f);
 	if (serial_fd == -1) {
-		perror("Failed to open serial");
+		WARN(-2,errno,"failed to open serial port \"%s\"\n",argv[argc-1]);
 		return 2;
 	}
-
 	int ret = serial_init(serial_fd);
 	if (ret) {
-		fprintf(stderr,"could not initialize serial\n");
+		WARN(-1,errno,"could not initialize serial \"%s\", %x\n",argv[argc-1],ret);
 	}
 
-	do {
-		ret = bootloader_init(serial_fd, utimeout);
-		//printf("bootloader_init: %d\n",ret);
-		if (ret <= kERR) {
-			fprintf(stderr,"bootloader_init (%d):",ret);
-			perror(0);
-			return ret;
+	int opt;
+	while ( (opt = getopt(argc,argv,optstr)) != -1 ) {
+		switch(opt) {
+		case '?':
+			WARN(-1,0,"bad option %c\n",optopt);
+		case 'h':
+			usage(argv[0]);
+			return 1;
+
+		case 'D':
+		case 'd':
+			debug = 1;
+			INFO("debuging enabled\n");
+			break;
+		case 't': { 
+				long tmp;
+				int ret = sscanf(optarg,"%li",&tmp);
+				if (ret != 1) {
+					WARN(-2,0,"specified timeout (\"%s\") invalid\n",optarg); 
+				}
+				utimeout = tmp;
+				INFO("timeout changed to %li usecs\n",utimeout);
+			}
+			break;
+		case 'i':
+			INFO("connecting to bootloader....");
+			do {
+				ret = bootloader_init(serial_fd, utimeout);
+				//printf("bootloader_init: %d\n",ret);
+				if (ret <= kERR) {
+					WARN(ret,errno,"bootloader_init: %d\n",ret);
+				}
+			} while (ret < 0);
+			INFO("connected to bootloader : %d\n",ret);
+			break;	
+		case 'c':
+			get_commands(serial_fd,utimeout);
+			break;
+		case 'v':
+			get_version(serial_fd,utimeout);
+			break;
+		case 'p':
+			get_id(serial_fd,utimeout);
+			break;
 		}
-	} while (ret < 0);
+	}
 
-	INFO("connected to bootloader : %d\n",ret);
+	if ( (argc - optind) != 1) {
+		WARN(0,0,"Serial port is unspecified\n");
+		usage(argv[0]);
+		return 1;
+	}
 
-	get_commands(serial_fd,utimeout);
-	get_version(serial_fd,utimeout);
-	get_id(serial_fd,utimeout);
 	return 0;
 }
