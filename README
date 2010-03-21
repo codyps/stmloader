@@ -1,0 +1,11 @@
+STMLOADER
+
+
+WORKING:
+	Get product id, supported commands, and bootloader version.
+
+TODO:
+	Add enter program mode for VEX cortex
+	Impliment the following commands: Read, Write, WriteProtect,
+		WriteUnprotect, ReadProtect, ReadUnprotect.
+
