@@ -344,7 +344,7 @@ const char optstr[] = "hDt:icvprgweXxZz";
 
 void usage(char *name) {
 	fprintf(stderr,
-		"usage: %s [options] [actions] <serial port>\n"
+		"usage: %s <serial port> [options] [actions]\n"
 		"options: -h            help (show this)\n"
 		"         -D            debugging output\n"
 		"         -t useconds   change serial timeout\n"
@@ -372,15 +372,15 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-
-	int serial_fd = open(argv[argc-1], O_RDWR);//fileno(serial_f);
+	char *serial_s = argv[1];
+	int serial_fd = open(serial_s, O_RDWR);//fileno(serial_f);
 	if (serial_fd == -1) {
-		WARN(-2,errno,"failed to open serial port \"%s\"\n",argv[argc-1]);
+		WARN(-2,errno,"failed to open serial port \"%s\"\n",serial_s);
 		return 2;
 	}
 	int ret = serial_init(serial_fd);
 	if (ret) {
-		WARN(-1,errno,"could not initialize serial \"%s\", %x\n",argv[argc-1],ret);
+		WARN(-1,errno,"could not initialize serial \"%s\", %x\n",serial_s,ret);
 	}
 
 	int opt;
