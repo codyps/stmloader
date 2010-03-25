@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -9,6 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #include <getopt.h>
@@ -16,15 +18,15 @@
 int debug = 0;
 #define unlikely(x)     __builtin_expect((x),0)
 
-#define INFO(...) do {                                                      \
-		if (unlikely(debug)) {                                               \
-			fprintf(stderr,"INFO: ");\
+#define INFO(...) do {                                                     \
+		if (unlikely(debug)) {                                     \
+			fprintf(stderr,"INFO: ");                          \
 			perror_at_line(0,0,__func__,__LINE__,__VA_ARGS__); \
 		}                                                          \
 	} while(0)
 
 #define WARN(_exitnum_,_errnum_,...) do {               \
-		fprintf(stderr,"WARN: ");\
+		fprintf(stderr,"WARN: ");               \
 		perror_at_line(_exitnum_,_errnum_,      \
 			__func__,__LINE__,__VA_ARGS__); \
 	} while(0)
@@ -43,6 +45,7 @@ perror_at_line(int status, int errnum, const char *fname,
 	else
 		fprintf(stderr," : ");
 	vfprintf(stderr,format,vl);
+	fputc('\n',stderr);
 	fflush(stderr);
 	if (status)
 		exit(status);
@@ -108,13 +111,13 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 		if (sret == 0) return kTIME;
 
 		if (sret != 1) {
-			WARN(0,errno,"select\n");
+			WARN(0,errno,"select");
 			return kERR;
 		}
 	
 		ret = read(fd, buf + pos, nbyte - pos);
 		if (ret == -1) {
-			WARN(0,errno,"read failed\n");
+			WARN(0,errno,"read failed");
 			return kERR;
 		}
 		pos += ret;
@@ -138,28 +141,28 @@ int wait_ack(int fd, long usec_tout) {
 
 		switch (ret) {
 			case  0: 
-				INFO("timeout\n");
+				INFO("timeout");
 				return -1;
 	
 			case  1: 
 				rret = read(fd,&tmp,1);
 				if (rret == 1) {
 					if (tmp == b_ack) {
-						INFO("got ack\n");
+						INFO("got ack");
 						return 0;
 					}
 					if (tmp == b_nack) {
-						INFO("got nack\n");
+						INFO("got nack");
 						return 1;
 					}
-					WARN(0,0,"recieved junk byte %x\n",tmp);
+					WARN(0,0,"recieved junk byte %x",tmp);
 				} else {
 					WARN(0,0,"read %d\n",rret);
 				}
 				break;
 			default:
 			case -1:
-				WARN(0,errno,"select error\n");
+				WARN(0,errno,"select error");
 				return kERR;
 		}
 	} while (1);
@@ -183,7 +186,7 @@ int send_command(int fd, enum to_boot com, long usec_tout) {
 	char tmp[2];
 	ssize_t ret;
 	size_t pos = 0;
-	INFO("sending 0x%02X\n",com);
+	INFO("sending 0x%02X",com);
 	tmp[0] = com;
 	tmp[1] = ~com;
 	do {
@@ -218,13 +221,13 @@ int serial_init(int fd) {
 	}
 	ret = cfsetospeed(&tp_n,B115200);
 	if (ret == -1) {
-		perror("cfsetospeed");
+		WARN(0,errno,"cfsetospeed");
 		return 5;
 	}
 
 	ret = tcsetattr(fd, TCSAFLUSH, &tp_n);
 	if (ret == -1) {
-		perror("tcsetattr");
+		WARN(0,errno,"tcsetattr");
 		return 6;
 	}
 
@@ -235,9 +238,9 @@ int get_id(int fd, long utimeout) {
 	do {
 		ret = send_command(fd, c_get_id, utimeout);
 	} while (ret == kTIME);
-	INFO("send command c_geti (%d)\n",ret);
+	INFO("send command c_geti (%d)",ret);
 	if (ret) {
-		WARN(0,errno,"send command\n");
+		WARN(0,errno,"send command");
 		return ret -1;
 	}
 
@@ -264,22 +267,22 @@ int get_version(int fd, long utimeout) {
 	INFO("getting version\n");
 	int ret;
 	ret = send_command(fd, c_getv, utimeout);
-	INFO("send command c_getv (%d)\n",ret);
+	INFO("send command c_getv (%d)",ret);
 	if (ret) {
-		WARN(0,errno,"send command\n");
+		WARN(0,errno,"send command");
 		return ret -1;
 	}
 
 	char data[3];
 	ret = s_read(fd, data, 3, utimeout);
 	if (ret) {
-		WARN(0,errno,"s_read of 3 bytes returned %d\n",ret);
+		WARN(0,errno,"s_read of 3 bytes returned %d",ret);
 		return -4;
 	}
 		
 	ret = wait_ack(fd,utimeout);
 	if (ret) {
-		WARN(0,errno,"wait_ack returned %d\n",ret);
+		WARN(0,errno,"wait_ack returned %d",ret);
 	}
 
 	printf("GETV\n"
@@ -295,19 +298,19 @@ int get_commands(int fd, long utimeout) {
 	do {
 		ret = send_command(fd, c_get, utimeout);
 	} while (ret == kTIME);
-	INFO("sent command c_get (%d)\n",ret);
+	INFO("sent command c_get (%d)",ret);
 	if (ret) {
-		WARN(0,errno,"send_command returned %d\n",ret);
+		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
 	}
 
 	uint8_t n;
 	ret = s_read(fd, &n, 1, utimeout);
-	INFO("s_read of numbytes returned %d and got %u\n",ret,n);
+	INFO("s_read of numbytes returned %d and got %u",ret,n);
 
 	if (ret)  {
 		WARN(0,errno,
-			"s_read of numbytes returned %d and got %u\n",ret,n);
+			"s_read of numbytes returned %d and got %u",ret,n);
 		return ret - 2;
 	}
 
@@ -320,14 +323,14 @@ int get_commands(int fd, long utimeout) {
 	ret = s_read(fd, get_d, n, utimeout);
 	if (ret) {
 		WARN(0,errno,
-			"s_read of commands returned %d\n",ret);
+			"s_read of commands returned %d",ret);
 		return ret -3;
 	}
-	INFO("s_read{c_get data}: %d\n",ret);
+	INFO("s_read{c_get data}: %d",ret);
 
 	ret = wait_ack(fd,utimeout);
 	if (ret) {
-		WARN(0,errno,"wait_ack: %d\n",ret);
+		WARN(0,errno,"wait_ack: %d",ret);
 	}
 	size_t i;
 	printf("GET\n"
@@ -395,16 +398,16 @@ int main(int argc, char **argv) {
 		case 'D':
 		case 'd':
 			debug = 1;
-			INFO("debuging enabled\n");
+			INFO("debuging enabled");
 			break;
 		case 't': { 
 				long tmp;
 				int ret = sscanf(optarg,"%li",&tmp);
 				if (ret != 1) {
-					WARN(-2,0,"specified timeout (\"%s\") invalid\n",optarg); 
+					WARN(-2,0,"specified timeout (\"%s\") invalid",optarg); 
 				}
 				utimeout = tmp;
-				INFO("timeout changed to %li usecs\n",utimeout);
+				INFO("timeout changed to %li usecs",utimeout);
 			}
 			break;
 		case 'i':
@@ -413,10 +416,10 @@ int main(int argc, char **argv) {
 				ret = bootloader_init(serial_fd, utimeout);
 				//printf("bootloader_init: %d\n",ret);
 				if (ret <= kERR) {
-					WARN(ret,errno,"bootloader_init: %d\n",ret);
+					WARN(ret,errno,"bootloader_init: %d",ret);
 				}
 			} while (ret < 0);
-			INFO("connected to bootloader : %d\n",ret);
+			INFO("connected to bootloader : %d",ret);
 			break;	
 		case 'c':
 			get_commands(serial_fd,utimeout);
@@ -431,10 +434,11 @@ int main(int argc, char **argv) {
 	}
 
 	if ( (argc - optind) != 1) {
-		WARN(0,0,"Serial port is unspecified\n");
+		WARN(0,0,"Serial port is unspecified");
 		usage(argv[0]);
 		return 1;
 	}
+
 
 	return 0;
 }
