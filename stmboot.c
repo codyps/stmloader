@@ -349,7 +349,7 @@ int tty_ctrl(int fd, int pin_msk, bool high) {
 	int s;
 	int r = ioctl(fd, TIOCMGET, &s);
 	if (r)
-		WARN(0,errno,"ioctl_TIOCMGET returned %d",r);
+		WARN(0,errno,"ioctl_TIOCMGET returned %d : \"%s\"",r,strerror(r));
 	
 	if (pin_msk) {
 		int sb = s;
@@ -361,18 +361,14 @@ int tty_ctrl(int fd, int pin_msk, bool high) {
 		
 		r = ioctl(fd, TIOCMSET, &sb);
 		if (r)
-			WARN(0,errno,"ioctl_TIOCMSET returned %d",r);
+			WARN(0,errno,"ioctl_TIOCMSET returned %d : \"%s\"",r,strerror(r));
 	}
 	return s;
 }
 
-void tty_getctrl(int fd) {
-	int status;
-
-	int ret = ioctl(fd, TIOCMGET, &status);
-	if (ret) 
-		WARN(0,errno,"ioctl_TIOCMGET failure %d : %s",ret,strerror(ret));
-
+void tty_printctrl(int fd) {
+	int status = tty_ctrl(fd,0,0);
+	
 	printf("0x%02x :: ",status);
 	printf("CAR:%d ",MSK(TIOCM_CAR,status));
 	printf("RNG:%d ",MSK(TIOCM_RNG,status));
@@ -446,7 +442,7 @@ int main(int argc, char **argv) {
 
 		case 'T':
 			do {
-				tty_getctrl(serial_fd);
+				tty_printctrl(serial_fd);
 				usleep(utimeout);
 			} while(1);
 			return 0;
