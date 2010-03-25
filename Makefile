@@ -26,7 +26,7 @@ $(TARGET) : $(OBJECTS)
 	$(LD) $(ALL_LFLAGS) -o $@ $^
 
 clean:
-	$(RM) $(TARGET) $(OBJECTS) $(TRASH)
+	$(RM) $(TARGET) $(TARGET:=.exe) $(OBJECTS) $(TRASH)
 
 %.c.o : %.c $(HEADER)
 	$(CC) $(ALL_CFLAGS) -c -o $@ $<
