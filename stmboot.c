@@ -85,7 +85,7 @@ enum from_boot {
  * the packet must be 0x00.
  */
 
-enum returns{
+enum returns {
 	kERR = -3,
 	kUNEX = -2,
 	kTIME = -1,
@@ -343,11 +343,57 @@ int get_commands(int fd, long utimeout) {
 	return 0;
 }
 
-const char optstr[] = "hDt:icvprgweXxZz";
+#define MSK(_msk_,_x_) !!((_msk_)&(_x_))
+
+int tty_ctrl(int fd, int pin_msk, bool high) {
+	int s;
+	int r = ioctl(fd, TIOCMGET, &s);
+	if (r)
+		WARN(0,errno,"ioctl_TIOCMGET returned %d",r);
+	
+	if (pin_msk) {
+		int sb = s;
+		if (high) {
+			sb |= pin_msk;
+		} else {
+			sb &= pin_msk;
+		}
+		
+		r = ioctl(fd, TIOCMSET, &sb);
+		if (r)
+			WARN(0,errno,"ioctl_TIOCMSET returned %d",r);
+	}
+	return s;
+}
+
+void tty_getctrl(int fd) {
+	int status;
+
+	int ret = ioctl(fd, TIOCMGET, &status);
+	if (ret) 
+		WARN(0,errno,"ioctl_TIOCMGET failure %d : %s",ret,strerror(ret));
+
+	printf("0x%02x :: ",status);
+	printf("CAR:%d ",MSK(TIOCM_CAR,status));
+	printf("RNG:%d ",MSK(TIOCM_RNG,status));
+	printf("DSR:%d ",MSK(TIOCM_DSR,status));
+	printf("DTR:%d ",MSK(TIOCM_DTR,status));
+	printf("RTS:%d ",MSK(TIOCM_RTS,status));
+	printf("CTS:%d ",MSK(TIOCM_CTS,status));
+	#if defined(TIOCM_ST)
+	printf("ST:%d " ,MSK(TIOCM_ST,status));
+	#endif
+	#if defined(TIOCM_SR)
+	printf("SR:%d ",MSK(TIOCM_SR,status));
+	#endif
+	putchar('\n');
+}
+
+const char optstr[] = "hDt:icvprgweXxZzT";
 
 void usage(char *name) {
 	fprintf(stderr,
-		"usage: %s <serial port> [options] [actions]\n"
+		"usage: %s [options] [actions] <serial port>\n"
 		"options: -h            help (show this)\n"
 		"         -D            debugging output\n"
 		"         -t useconds   change serial timeout\n"
@@ -363,6 +409,7 @@ void usage(char *name) {
 		"         -x            write unprotect\n"
 		"         -Z            readout protect\n"
 		"         -z            readout unprotect\n"
+		"         -T            just read ctrl lines\n"
 		       ,name);
 }
 
@@ -375,25 +422,34 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	char *serial_s = argv[1];
+	char *serial_s = argv[argc-1];
 	int serial_fd = open(serial_s, O_RDWR);//fileno(serial_f);
 	if (serial_fd == -1) {
-		WARN(-2,errno,"failed to open serial port \"%s\"\n",serial_s);
+		WARN(-2,errno,"failed to open serial port \"%s\"",serial_s);
 		return 2;
 	}
 	int ret = serial_init(serial_fd);
 	if (ret) {
-		WARN(-1,errno,"could not initialize serial \"%s\", %x\n",serial_s,ret);
+		WARN(-1,errno,"could not initialize serial \"%s\", %x",serial_s,ret);
 	}
 
 	int opt;
 	while ( (opt = getopt(argc,argv,optstr)) != -1 ) {
 		switch(opt) {
 		case '?':
-			WARN(-1,0,"bad option %c\n",optopt);
+			WARN(-1,0,"bad option %c",optopt);
 		case 'h':
 			usage(argv[0]);
 			return 1;
+		default:
+			WARN(-1,0,"unknown option %c",optopt);
+
+		case 'T':
+			do {
+				tty_getctrl(serial_fd);
+				usleep(utimeout);
+			} while(1);
+			return 0;
 
 		case 'D':
 		case 'd':
