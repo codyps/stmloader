@@ -411,6 +411,9 @@ void usage(char *name) {
 		"         -Z            readout protect\n"
 		"         -z            readout unprotect\n"
 		"         -T            just read ctrl lines\n"
+		"\n"
+		"example : \n"
+		"> ./stmboot -s /dev/ttyUSB0 -i -c\n\n"
 		       ,name);
 }
 
@@ -498,12 +501,6 @@ int main(int argc, char **argv) {
 			get_id(serial_fd,utimeout);
 			break;
 		}
-	}
-
-	if ( (argc - optind) != 1) {
-		WARN(0,0,"Serial port is unspecified");
-		usage(argv[0]);
-		return 1;
 	}
 
 	return 0;
