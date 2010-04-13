@@ -389,14 +389,15 @@ void tty_getctrl(int fd) {
 	putchar('\n');
 }
 
-const char optstr[] = "hDt:icvprgweXxZzT";
+const char optstr[] = "hDs:t:icvprgweXxZzT";
 
 void usage(char *name) {
 	fprintf(stderr,
-		"usage: %s [options] [actions] <serial port>\n"
+		"usage: %s [options] [actions]\n"
 		"options: -h            help (show this)\n"
 		"         -D            debugging output\n"
 		"         -t useconds   change serial timeout\n"
+		"         -s <tty>      serial port\n"
 		"actions: -i            initialize bootloader\n"
 		"         -c            get boot supported commands\n"
 		"         -v            get boot version\n"
@@ -422,16 +423,9 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	char *serial_s = argv[argc-1];
-	int serial_fd = open(serial_s, O_RDWR);//fileno(serial_f);
-	if (serial_fd == -1) {
-		WARN(-2,errno,"failed to open serial port \"%s\"",serial_s);
-		return 2;
-	}
-	int ret = serial_init(serial_fd);
-	if (ret) {
-		WARN(-1,errno,"could not initialize serial \"%s\", %x",serial_s,ret);
-	}
+	char *serial_s = "";
+	int serial_fd = -1; 
+
 
 	int opt;
 	while ( (opt = getopt(argc,argv,optstr)) != -1 ) {
@@ -444,6 +438,24 @@ int main(int argc, char **argv) {
 		default:
 			WARN(-1,0,"unknown option %c",optopt);
 
+
+		case 's':
+			if (serial_fd >= 0) {
+				INFO("closing already open serial \"%s\".",serial_s);
+				close(serial_fd);
+			}
+			serial_s = optarg;
+			INFO("opening serial port \"%s\".",serial_s);
+			serial_fd = open(serial_s, O_RDWR);
+			if (serial_fd < 0) {
+				WARN(-2,errno,"opening serial port \"%s\" failed",serial_s);
+			}
+			int ret = serial_init(serial_fd);
+			if (ret) {
+				WARN(-1,errno,"could not initialize serial \"%s\", %x",serial_s,ret);
+			}
+			break;
+
 		case 'T':
 			do {
 				tty_getctrl(serial_fd);
@@ -452,7 +464,6 @@ int main(int argc, char **argv) {
 			return 0;
 
 		case 'D':
-		case 'd':
 			debug = 1;
 			INFO("debuging enabled");
 			break;
@@ -494,7 +505,6 @@ int main(int argc, char **argv) {
 		usage(argv[0]);
 		return 1;
 	}
-
 
 	return 0;
 }
