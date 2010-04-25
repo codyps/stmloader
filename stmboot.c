@@ -56,7 +56,7 @@ enum to_boot {
 	c_getv     = 0x01,
 	c_get_id   = 0x02,
 	c_read     = 0x11,
-	c_run      = 0x21,
+	c_go      = 0x21,
 	c_write    = 0x31,
 	c_erase    = 0x43,
 	c_w_prot   = 0x63,
@@ -142,7 +142,7 @@ int wait_ack(int fd, long usec_tout) {
 		switch (ret) {
 			case  0: 
 				INFO("timeout");
-				return -1;
+				return kTIME;
 	
 			case  1: 
 				rret = read(fd,&tmp,1);
@@ -198,6 +198,33 @@ int send_command(int fd, enum to_boot com, long usec_tout) {
 	
 	return wait_ack(fd, usec_tout);
 }
+
+int send_command2(int fd, enum to_boot com, long usec_tout)
+{
+	char tmp[2];
+	ssize_t wret;
+	size_t pos = 0;
+	int aret;
+	INFO("sending 0x%02X",com);
+	tmp[0] = com;
+	tmp[1] = ~com;
+	do {
+		do {
+			wret = write( fd, tmp + pos, sizeof(tmp) - pos);
+			if (wret == -1) {
+				WARN(0,errno,"send command");
+				return kERR - 1;
+			}
+			pos += wret;
+		} while(pos < sizeof(tmp));
+		
+		aret = wait_ack(fd, usec_tout);
+	
+	} while(aret == kTIME);
+	INFO("sent command (%d)",aret);
+	return aret;	
+}
+
 int serial_init(int fd) {
 	struct termios tp_o;
 	struct termios tp_n;
@@ -233,6 +260,9 @@ int serial_init(int fd) {
 
 	return 0;
 }
+
+
+
 int get_id(int fd, long utimeout) {
 	int ret;
 	do {
@@ -343,6 +373,114 @@ int get_commands(int fd, long utimeout) {
 	return 0;
 }
 
+int cmd_erase_mem(int fd, long utimeout, uint32_t addr,)
+{
+	/*
+	 * Notes:
+	 *  writes must be work aligned.
+	 *  start address is not checked very closely by bootloader.
+	 *  or at all.
+	 */
+	// send command + invert. 1,2
+	// wait for ack.
+	ret = send_command2(fd,c_write,utimeout);
+	if (ret) {
+		WARN(0,errno,"send_command returned %d",ret);
+		return ret - 1;
+	}
+	
+	// Send N.
+	// 1. 0 < N < 254 == erase N + 1 pages
+	// 2. N == 255 -> erase all pages
+	
+	// 1:
+	// Send N
+	// Send Page Numbers
+	// Send XOR of N & all Page Numbers
+	
+	// 2:
+	// Send N
+	// Send inverse of N
+	
+	// 1,2:
+	
+	// wait ack
+	
+	
+}
+
+int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
+{
+	/*
+	 * Notes:
+	 *  writes must be work aligned.
+	 *  start address is not checked very closely by bootloader.
+	 *  or at all.
+	 */
+	// send command + invert. 1,2
+	// wait for ack.
+	ret = send_command2(fd,c_write,utimeout);
+	if (ret) {
+		WARN(0,errno,"send_command returned %d",ret);
+		return ret - 1;
+	}
+	
+	// Send addr and checksum (XOR of all components)
+	
+	// wait ack
+	
+	// send num bytes to be written - 1
+
+	// send all data
+	
+	// send checksum (XOR of numbytes and all data)
+	
+	// wait ack
+}
+
+int cmd_go(int fd, long utimeout, uint32_t addr) 
+{
+	// send command + invert. 1,2
+	// wait for ack	 (note: fails if ROP enabled)
+	ret = send_command2(fd,c_go,utimeout);
+	if (ret) {
+		WARN(0,errno,"send_command returned %d",ret);
+		return ret - 1;
+	}
+
+	// send address (3,4,5,6)
+	
+	// send xor checksum.
+	
+	// wait for ack.
+}
+
+int cmd_read_mem(int fd, long utimeout, uint32_t addr) 
+{
+	// send command + invert. 1,2
+	// wait for ack	
+	ret = send_command2(fd,c_read,utimeout);
+	if (ret) {
+		WARN(0,errno,"send_command returned %d",ret);
+		return ret - 1;
+	}
+
+	// Send 4 byte address. MSB first. 3,4,5,6
+	
+	// Send Checksum (XOR of address bytes) 7
+		
+	// Wait for ack.
+	
+	// Send ( [number of bytes to read] - 1 ) 8
+	
+	// Send Checksum (XOR byte 8 (with 0xFF), compliment) 9
+	
+	// Wait for ack.
+	
+	// Read data.
+	
+}
+
 #define MSK(_msk_,_x_) !!((_msk_)&(_x_))
 
 int tty_ctrl(int fd, int pin_msk, bool high) {
@@ -417,7 +555,6 @@ int main(int argc, char **argv) {
 	long utimeout = 200000;
 
 	if (argc < 2) {
-		WARN(0,0,"unspecified serial port\n");
 		usage(argv[0]);
 		return 1;
 	}
@@ -497,6 +634,12 @@ int main(int argc, char **argv) {
 			get_id(serial_fd,utimeout);
 			break;
 		}
+	}
+
+	INFO("optind %d, argc %d",optind, argc);
+
+	if ( (argc-optind) > 0) {
+		WARN(0,0,"unrecognized parameters (%d of them).",argc-optind);
 	}
 
 	return 0;
