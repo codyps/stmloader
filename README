@@ -7,5 +7,7 @@ WORKING:
 TODO:
 	Add enter program mode for VEX cortex
 	Impliment the following commands: Read, Write, WriteProtect,
-		WriteUnprotect, ReadProtect, ReadUnprotect.
+		WriteUnprotect, ReadProtect, ReadUnprotect, GO.
 
+For more:
+	See usage and source code.
