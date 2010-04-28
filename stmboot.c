@@ -157,7 +157,7 @@ int wait_ack(int fd, long usec_tout) {
 					}
 					WARN(0,0,"recieved junk byte %x",tmp);
 				} else {
-					WARN(0,0,"read %d\n",rret);
+					WARN(0,0,"read %zi\n",rret);
 				}
 				break;
 			default:
@@ -480,7 +480,6 @@ int main(int argc, char **argv) {
 			INFO("connecting to bootloader....");
 			do {
 				ret = bootloader_init(serial_fd, utimeout);
-				//printf("bootloader_init: %d\n",ret);
 				if (ret <= kERR) {
 					WARN(ret,errno,"bootloader_init: %d",ret);
 				}
