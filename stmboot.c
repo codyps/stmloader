@@ -373,7 +373,7 @@ int get_commands(int fd, long utimeout) {
 	return 0;
 }
 
-int cmd_erase_mem(int fd, long utimeout, uint32_t addr,)
+int cmd_erase_mem(int fd, long utimeout, uint32_t addr, int8_t len )
 {
 	/*
 	 * Notes:
@@ -383,7 +383,7 @@ int cmd_erase_mem(int fd, long utimeout, uint32_t addr,)
 	 */
 	// send command + invert. 1,2
 	// wait for ack.
-	ret = send_command2(fd,c_write,utimeout);
+	int ret = send_command2(fd,c_write,utimeout);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -407,6 +407,7 @@ int cmd_erase_mem(int fd, long utimeout, uint32_t addr,)
 	// wait ack
 	
 	
+	return 0;
 }
 
 int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
@@ -419,7 +420,7 @@ int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
 	 */
 	// send command + invert. 1,2
 	// wait for ack.
-	ret = send_command2(fd,c_write,utimeout);
+	int ret = send_command2(fd,c_write,utimeout);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -436,13 +437,15 @@ int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
 	// send checksum (XOR of numbytes and all data)
 	
 	// wait ack
+	
+	return 0;
 }
 
 int cmd_go(int fd, long utimeout, uint32_t addr) 
 {
 	// send command + invert. 1,2
 	// wait for ack	 (note: fails if ROP enabled)
-	ret = send_command2(fd,c_go,utimeout);
+	int ret = send_command2(fd,c_go,utimeout);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -453,13 +456,15 @@ int cmd_go(int fd, long utimeout, uint32_t addr)
 	// send xor checksum.
 	
 	// wait for ack.
+
+	return 0;
 }
 
 int cmd_read_mem(int fd, long utimeout, uint32_t addr) 
 {
 	// send command + invert. 1,2
 	// wait for ack	
-	ret = send_command2(fd,c_read,utimeout);
+	int ret = send_command2(fd,c_read,utimeout);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -479,6 +484,7 @@ int cmd_read_mem(int fd, long utimeout, uint32_t addr)
 	
 	// Read data.
 	
+	return 0;
 }
 
 #define MSK(_msk_,_x_) !!((_msk_)&(_x_))
@@ -568,30 +574,38 @@ int main(int argc, char **argv) {
 		switch(opt) {
 		case '?':
 			WARN(-1,0,"bad option %c",optopt);
+			break;
+
 		case 'h':
 			usage(argv[0]);
 			return 1;
+			
 		default:
-			WARN(-1,0,"unknown option %c",optopt);
+			WARN(-1,0,"unimplimented option '%c'",opt);
+			break;
 
-
-		case 's':
+		case 's': {
 			if (serial_fd >= 0) {
-				INFO("closing already open serial \"%s\".",serial_s);
+				INFO("closing already open serial \"%s\".",
+					serial_s);
 				close(serial_fd);
 			}
 			serial_s = optarg;
 			INFO("opening serial port \"%s\".",serial_s);
 			serial_fd = open(serial_s, O_RDWR);
 			if (serial_fd < 0) {
-				WARN(-2,errno,"opening serial port \"%s\" failed",serial_s);
+				WARN(-2,errno,
+					"opening serial port \"%s\" failed",
+					serial_s);
 			}
 			int ret = serial_init(serial_fd);
 			if (ret) {
-				WARN(-1,errno,"could not initialize serial \"%s\", %x",serial_s,ret);
+				WARN(-1,errno,
+					"could not initialize serial \"%s\", %x",
+					serial_s,ret);
 			}
 			break;
-
+		}
 		case 'T':
 			do {
 				tty_printctrl(serial_fd);
@@ -604,17 +618,20 @@ int main(int argc, char **argv) {
 			INFO("debuging enabled");
 			break;
 		case 't': { 
-				long tmp;
-				int ret = sscanf(optarg,"%li",&tmp);
-				if (ret != 1) {
-					WARN(-2,0,"specified timeout (\"%s\") invalid",optarg); 
-				}
-				utimeout = tmp;
-				INFO("timeout changed to %li usecs",utimeout);
+			long tmp;
+			int ret = sscanf(optarg,"%li",&tmp);
+			if (ret != 1) {
+				WARN(-2,errno,
+					"specified timeout (\"%s\") invalid",
+					optarg); 
 			}
+			utimeout = tmp;
+			INFO("timeout changed to %li usecs",utimeout);
 			break;
-		case 'i':
+		}
+		case 'i': {
 			INFO("connecting to bootloader....");
+			int ret;
 			do {
 				ret = bootloader_init(serial_fd, utimeout);
 				if (ret <= kERR) {
@@ -623,6 +640,8 @@ int main(int argc, char **argv) {
 			} while (ret < 0);
 			INFO("connected to bootloader : %d",ret);
 			break;	
+		}
+
 		case 'c':
 			get_commands(serial_fd,utimeout);
 			break;
