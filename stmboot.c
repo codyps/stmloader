@@ -31,6 +31,13 @@ int debug = 0;
 			__func__,__LINE__,__VA_ARGS__); \
 	} while(0)
 
+/* ST bootloader link */
+struct stblink {
+	int fd;
+	long utimeout;
+};
+
+
 void __attribute__((format(printf,5,6)))
 perror_at_line(int status, int errnum, const char *fname,
 	unsigned int linenum, const char *format, ...)
@@ -56,7 +63,7 @@ enum to_boot {
 	c_getv     = 0x01,
 	c_get_id   = 0x02,
 	c_read     = 0x11,
-	c_go      = 0x21,
+	c_go       = 0x21,
 	c_write    = 0x31,
 	c_erase    = 0x43,
 	c_w_prot   = 0x63,
@@ -182,7 +189,8 @@ int bootloader_init(int fd, long usec_tout) {
 	return ret;
 }
 
-int send_command(int fd, enum to_boot com, long usec_tout) {
+int send_command(int fd, enum to_boot com, long usec_tout)
+{
 	char tmp[2];
 	ssize_t ret;
 	size_t pos = 0;
@@ -261,7 +269,23 @@ int serial_init(int fd) {
 	return 0;
 }
 
+uint8_t gen_check(const void *data, uint32_t len)
+{
+	const uint8_t *cdata = data;
+	const uint8_t *pos;
+	uint8_t check = 0; 
+	for(pos = cdata; pos < (cdata + len); pos++) {
+		check ^= *pos;
+	}
+	return check;
+}
 
+int send_data_check(struct stblink *stb, const void *data, uint32_t len)
+{
+	uint8_t check = gen_check(data, len);
+	write(stb->fd, data, len);
+	return write(stb->fd, &check, 1);
+}
 
 int get_id(int fd, long utimeout) {
 	int ret;
@@ -373,7 +397,7 @@ int get_commands(int fd, long utimeout) {
 	return 0;
 }
 
-int cmd_erase_mem(int fd, long utimeout, uint32_t addr, int8_t len )
+int cmd_erase_mem(int fd, long utimeout, uint32_t addr, uint8_t len )
 {
 	/*
 	 * Notes:
@@ -529,7 +553,7 @@ void tty_printctrl(int fd) {
 	putchar('\n');
 }
 
-const char optstr[] = "hDs:t:icvprgweXxZzT";
+const char optstr[] = "hDs:t:iIcvprgweXxZzT";
 
 void usage(char *name) {
 	fprintf(stderr,
@@ -539,6 +563,7 @@ void usage(char *name) {
 		"         -t useconds   change serial timeout\n"
 		"         -s <tty>      serial port\n"
 		"actions: -i            initialize bootloader\n"
+		"         -I            do IFI reset (play with RTS/DTR)\n"
 		"         -c            get boot supported commands\n"
 		"         -v            get boot version\n"
 		"         -p            get pid\n"
@@ -555,6 +580,16 @@ void usage(char *name) {
 		"example : \n"
 		"> ./stmboot -s /dev/ttyUSB0 -i -c\n\n"
 		       ,name);
+}
+
+void cmd_mem_w_protect(void)
+{
+
+}
+
+void cmd_mem_r_protect(void)
+{
+
 }
 
 int main(int argc, char **argv) {
@@ -606,6 +641,7 @@ int main(int argc, char **argv) {
 			}
 			break;
 		}
+
 		case 'T':
 			do {
 				tty_printctrl(serial_fd);
@@ -629,6 +665,7 @@ int main(int argc, char **argv) {
 			INFO("timeout changed to %li usecs",utimeout);
 			break;
 		}
+
 		case 'i': {
 			INFO("connecting to bootloader....");
 			int ret;
