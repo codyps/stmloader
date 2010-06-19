@@ -101,7 +101,7 @@ enum returns {
 };
 
 // -3 = error
-int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
+int s_read(struct stblink *stb, void *buf, size_t nbyte) {
 	size_t pos = 0;
 	ssize_t ret;
 	size_t sret;
@@ -110,19 +110,19 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 
 	do {
 		FD_ZERO(&fds);
-		FD_SET(fd,&fds);
-		timeout.tv_sec =0;
-		timeout.tv_usec=usec_tout;
+		FD_SET(stb->fd, &fds);
+		timeout.tv_sec  = 0;
+		timeout.tv_usec = stb->utimeout;
 
-		sret = select(fd+1,&fds,NULL,NULL,&timeout);
+		sret = select(stb->fd + 1, &fds, NULL, NULL, &timeout);
 		if (sret == 0) return kTIME;
 
 		if (sret != 1) {
-			WARN(0,errno,"select");
+			WARN(0, errno, "select");
 			return kERR;
 		}
 	
-		ret = read(fd, buf + pos, nbyte - pos);
+		ret = read(stb->fd, buf + pos, nbyte - pos);
 		if (ret == -1) {
 			WARN(0,errno,"read failed");
 			return kERR;
@@ -132,64 +132,65 @@ int s_read(int fd, void *buf, size_t nbyte, long usec_tout) {
 	return 0;
 }
 
-
 // 1 = nack, 0 = ack, -1 = timeout, -3 = error
-int wait_ack(int fd, long usec_tout) {
+int wait_ack(const struct stblink *stb)
+{
 	char tmp;
 	int ret;
 	ssize_t rret;
 	fd_set fds;
 	do {
-		struct timeval timeout = { .tv_sec=0, .tv_usec=usec_tout };
+		struct timeval timeout = { .tv_sec=0, .tv_usec=stb->utimeout };
 		FD_ZERO(&fds);
-		FD_SET(fd,&fds);
+		FD_SET(stb->fd, &fds);
 
-		ret = select(fd+1,&fds,NULL,NULL,&timeout);
+		ret = select(stb->fd + 1, &fds, NULL, NULL, &timeout);
 
 		switch (ret) {
-			case  0: 
-				INFO("timeout");
-				return kTIME;
-	
-			case  1: 
-				rret = read(fd,&tmp,1);
-				if (rret == 1) {
-					if (tmp == b_ack) {
-						INFO("got ack");
-						return 0;
-					}
-					if (tmp == b_nack) {
-						INFO("got nack");
-						return 1;
-					}
-					WARN(0,0,"recieved junk byte %x",tmp);
-				} else {
-					WARN(0,0,"read %zi\n",rret);
+		case  0: 
+			INFO("timeout");
+			return kTIME;
+
+		case  1: 
+			rret = read(stb->fd, &tmp, 1);
+			if (rret == 1) {
+				if (tmp == b_ack) {
+				INFO("got ack");
+					return 0;
 				}
-				break;
-			default:
-			case -1:
-				WARN(0,errno,"select error");
-				return kERR;
+				if (tmp == b_nack) {
+					INFO("got nack");
+					return 1;
+				}
+				WARN(0, 0, "recieved junk byte %x", tmp);
+			} else {
+				WARN(0, 0, "read %zi\n", rret);
+			}
+			break;
+		default:
+		case -1:
+			WARN(0, errno, "select error");
+			return kERR;
 		}
 	} while (1);
 }
 
 // 0 = success, 1 = nacked, -1 = timeout, -2 = unknowndata, -3 = error
-int bootloader_init(int fd, long usec_tout) {
+int bootloader_init(struct stblink *stb)
+{
 	char tmp = i_start;
 	int ret;
 	do {
 		do {
-			ret = write(fd,&tmp,1);
+			ret = write(stb->fd, &tmp, 1);
 		} while (ret == 0);
 		if (ret == -1) return kERR - 1;
-		ret = wait_ack(fd,usec_tout);
-	} while( ret < 0 );
+		ret = wait_ack(stb);
+	} while(ret < 0);
 	return ret;
 }
 
-int send_command(int fd, enum to_boot com, long usec_tout)
+int send_command(struct stblink *stb, enum to_boot com)
 {
 	char tmp[2];
 	ssize_t ret;
@@ -198,16 +199,16 @@ int send_command(int fd, enum to_boot com, long usec_tout)
 	tmp[0] = com;
 	tmp[1] = ~com;
 	do {
-		ret = write( fd, tmp + pos, sizeof(tmp) - pos);
+		ret = write(stb->fd, tmp + pos, sizeof(tmp) - pos);
 		if (ret == -1)
 			return kERR - 1;
 		pos += ret;
 	} while(pos < sizeof(tmp));
 	
-	return wait_ack(fd, usec_tout);
+	return wait_ack(stb);
 }
 
-int send_command2(int fd, enum to_boot com, long usec_tout)
+int send_command2(struct stblink *stb, enum to_boot com)
 {
 	char tmp[2];
 	ssize_t wret;
@@ -218,15 +219,15 @@ int send_command2(int fd, enum to_boot com, long usec_tout)
 	tmp[1] = ~com;
 	do {
 		do {
-			wret = write( fd, tmp + pos, sizeof(tmp) - pos);
+			wret = write(stb->fd, tmp + pos, sizeof(tmp) - pos);
 			if (wret == -1) {
-				WARN(0,errno,"send command");
+				WARN(0, errno, "send command");
 				return kERR - 1;
 			}
 			pos += wret;
 		} while(pos < sizeof(tmp));
 		
-		aret = wait_ack(fd, usec_tout);
+		aret = wait_ack(stb);
 	
 	} while(aret == kTIME);
 	INFO("sent command (%d)",aret);
@@ -287,24 +288,24 @@ int send_data_check(struct stblink *stb, const void *data, uint32_t len)
 	return write(stb->fd, &check, 1);
 }
 
-int get_id(int fd, long utimeout) {
+int get_id(struct stblink *stb) {
 	int ret;
 	do {
-		ret = send_command(fd, c_get_id, utimeout);
+		ret = send_command(stb, c_get_id);
 	} while (ret == kTIME);
-	INFO("send command c_geti (%d)",ret);
+	INFO("send command c_geti (%d)", ret);
 	if (ret) {
-		WARN(0,errno,"send command");
+		WARN(0, errno, "send command");
 		return ret -1;
 	}
 
 	char len;
-	ret = s_read(fd, &len, 1, utimeout);
+	ret = s_read(stb, &len, 1);
 
 	char *data = malloc(len+1);
-	ret = s_read(fd, data, len+1, utimeout);
+	ret = s_read(stb, data, len + 1);
 
-	wait_ack(fd,utimeout);
+	wait_ack(stb);
 
 	printf("GET_ID\n"
 	       " PID: %02x " 
@@ -317,10 +318,10 @@ int get_id(int fd, long utimeout) {
 }
 
 
-int get_version(int fd, long utimeout) {
+int get_version(struct stblink *stb) {
 	INFO("getting version\n");
 	int ret;
-	ret = send_command(fd, c_getv, utimeout);
+	ret = send_command(stb, c_getv);
 	INFO("send command c_getv (%d)",ret);
 	if (ret) {
 		WARN(0,errno,"send command");
@@ -328,13 +329,13 @@ int get_version(int fd, long utimeout) {
 	}
 
 	char data[3];
-	ret = s_read(fd, data, 3, utimeout);
+	ret = s_read(stb, data, 3);
 	if (ret) {
 		WARN(0,errno,"s_read of 3 bytes returned %d",ret);
 		return -4;
 	}
 		
-	ret = wait_ack(fd,utimeout);
+	ret = wait_ack(stb);
 	if (ret) {
 		WARN(0,errno,"wait_ack returned %d",ret);
 	}
@@ -347,10 +348,10 @@ int get_version(int fd, long utimeout) {
 	return 0;
 }
 
-int get_commands(int fd, long utimeout) {
+int get_commands(struct stblink *stb) {
 	int ret;
 	do {
-		ret = send_command(fd, c_get, utimeout);
+		ret = send_command(stb, c_get);
 	} while (ret == kTIME);
 	INFO("sent command c_get (%d)",ret);
 	if (ret) {
@@ -359,7 +360,7 @@ int get_commands(int fd, long utimeout) {
 	}
 
 	uint8_t n;
-	ret = s_read(fd, &n, 1, utimeout);
+	ret = s_read(stb, &n, 1);
 	INFO("s_read of numbytes returned %d and got %u",ret,n);
 
 	if (ret)  {
@@ -374,7 +375,7 @@ int get_commands(int fd, long utimeout) {
 		return -7;
 	}
 	
-	ret = s_read(fd, get_d, n, utimeout);
+	ret = s_read(stb, get_d, n);
 	if (ret) {
 		WARN(0,errno,
 			"s_read of commands returned %d",ret);
@@ -382,7 +383,7 @@ int get_commands(int fd, long utimeout) {
 	}
 	INFO("s_read{c_get data}: %d",ret);
 
-	ret = wait_ack(fd,utimeout);
+	ret = wait_ack(stb);
 	if (ret) {
 		WARN(0,errno,"wait_ack: %d",ret);
 	}
@@ -397,7 +398,7 @@ int get_commands(int fd, long utimeout) {
 	return 0;
 }
 
-int cmd_erase_mem(int fd, long utimeout, uint32_t addr, uint8_t len )
+int cmd_erase_mem(struct stblink *stb, uint32_t addr, uint8_t len )
 {
 	/*
 	 * Notes:
@@ -407,7 +408,7 @@ int cmd_erase_mem(int fd, long utimeout, uint32_t addr, uint8_t len )
 	 */
 	// send command + invert. 1,2
 	// wait for ack.
-	int ret = send_command2(fd,c_write,utimeout);
+	int ret = send_command2(stb, c_write);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -434,7 +435,7 @@ int cmd_erase_mem(int fd, long utimeout, uint32_t addr, uint8_t len )
 	return 0;
 }
 
-int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
+int cmd_write_mem(struct stblink *stb, uint32_t addr, void *data, size_t len)
 {
 	/*
 	 * Notes:
@@ -444,7 +445,7 @@ int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
 	 */
 	// send command + invert. 1,2
 	// wait for ack.
-	int ret = send_command2(fd,c_write,utimeout);
+	int ret = send_command2(stb, c_write);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -465,11 +466,11 @@ int cmd_write_mem(int fd, long utimeout, uint32_t addr, void *data, size_t len)
 	return 0;
 }
 
-int cmd_go(int fd, long utimeout, uint32_t addr) 
+int cmd_go(struct stblink *stb, uint32_t addr) 
 {
 	// send command + invert. 1,2
 	// wait for ack	 (note: fails if ROP enabled)
-	int ret = send_command2(fd,c_go,utimeout);
+	int ret = send_command2(stb, c_go);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -484,11 +485,11 @@ int cmd_go(int fd, long utimeout, uint32_t addr)
 	return 0;
 }
 
-int cmd_read_mem(int fd, long utimeout, uint32_t addr) 
+int cmd_read_mem(struct stblink *stb, uint32_t addr) 
 {
 	// send command + invert. 1,2
 	// wait for ack	
-	int ret = send_command2(fd,c_read,utimeout);
+	int ret = send_command2(stb, c_read);
 	if (ret) {
 		WARN(0,errno,"send_command returned %d",ret);
 		return ret - 1;
@@ -593,7 +594,6 @@ void cmd_mem_r_protect(void)
 }
 
 int main(int argc, char **argv) {
-	long utimeout = 200000;
 
 	if (argc < 2) {
 		usage(argv[0]);
@@ -601,8 +601,8 @@ int main(int argc, char **argv) {
 	}
 
 	char *serial_s = "";
-	int serial_fd = -1; 
 
+	struct stblink stb = { -1, 200000 };
 
 	int opt;
 	while ( (opt = getopt(argc,argv,optstr)) != -1 ) {
@@ -620,20 +620,20 @@ int main(int argc, char **argv) {
 			break;
 
 		case 's': {
-			if (serial_fd >= 0) {
+			if (stb.fd >= 0) {
 				INFO("closing already open serial \"%s\".",
 					serial_s);
-				close(serial_fd);
+				close(stb.fd);
 			}
 			serial_s = optarg;
 			INFO("opening serial port \"%s\".",serial_s);
-			serial_fd = open(serial_s, O_RDWR);
-			if (serial_fd < 0) {
+			stb.fd = open(serial_s, O_RDWR);
+			if (stb.fd < 0) {
 				WARN(-2,errno,
 					"opening serial port \"%s\" failed",
 					serial_s);
 			}
-			int ret = serial_init(serial_fd);
+			int ret = serial_init(stb.fd);
 			if (ret) {
 				WARN(-1,errno,
 					"could not initialize serial \"%s\", %x",
@@ -644,8 +644,8 @@ int main(int argc, char **argv) {
 
 		case 'T':
 			do {
-				tty_printctrl(serial_fd);
-				usleep(utimeout);
+				tty_printctrl(stb.fd);
+				usleep(stb.utimeout);
 			} while(1);
 			return 0;
 
@@ -661,8 +661,8 @@ int main(int argc, char **argv) {
 					"specified timeout (\"%s\") invalid",
 					optarg); 
 			}
-			utimeout = tmp;
-			INFO("timeout changed to %li usecs",utimeout);
+			stb.utimeout = tmp;
+			INFO("timeout changed to %li usecs", stb.utimeout);
 			break;
 		}
 
@@ -670,7 +670,7 @@ int main(int argc, char **argv) {
 			INFO("connecting to bootloader....");
 			int ret;
 			do {
-				ret = bootloader_init(serial_fd, utimeout);
+				ret = bootloader_init(&stb);
 				if (ret <= kERR) {
 					WARN(ret,errno,"bootloader_init: %d",ret);
 				}
@@ -680,13 +680,13 @@ int main(int argc, char **argv) {
 		}
 
 		case 'c':
-			get_commands(serial_fd,utimeout);
+			get_commands(&stb);
 			break;
 		case 'v':
-			get_version(serial_fd,utimeout);
+			get_version(&stb);
 			break;
 		case 'p':
-			get_id(serial_fd,utimeout);
+			get_id(&stb);
 			break;
 		}
 	}
